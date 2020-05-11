@@ -25,7 +25,6 @@ void setroot();
 void statusloop();
 void termhandler(int signum);
 
-
 #include "blocks.h"
 
 static Display *dpy;
@@ -48,8 +47,10 @@ void getcmd(const Block *block, char *output)
 	int i = strlen(block->icon);
 	fgets(output+i, CMDLENGTH-i, cmdf);
 	i = strlen(output);
-	if (delim != '\0' && --i)
-		output[i++] = delim;
+        for (int index = 0; delim[index]; index++)
+            output[i++] = delim[index];
+	/* if (delim != '\0' && --i) */
+	/* 	output[i++] = delim; */
 	output[i++] = '\0';
 	pclose(cmdf);
 }
@@ -120,7 +121,6 @@ void pstdout()
 	fflush(stdout);
 }
 
-
 void statusloop()
 {
 #ifndef __OpenBSD__
@@ -156,7 +156,8 @@ int main(int argc, char** argv)
 	for(int i = 0; i < argc; i++)
 	{	
 		if (!strcmp("-d",argv[i]))
-			delim = argv[++i][0];
+                    delim = argv[++i];
+			/* delim = argv[++i][0]; */
 		else if(!strcmp("-p",argv[i]))
 			writestatus = pstdout;
 	}

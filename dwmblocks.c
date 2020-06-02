@@ -1,8 +1,6 @@
 /**
  * This program is not tested on OpenBSD, but I think the macros I moved still work. I hope.
  * TODO: make a man page
- * TODO: replace all int i = 0 with uint, I guess
- * TODO: a signal to refresh the entire bar
  */
 
 #include <stdlib.h>
@@ -92,12 +90,11 @@ void main(int argc, char **argv) {
 
 #ifndef __OpenBSD__
 	/* set up custom signals */
+	if (signal_restart > 0) signal(SIGRTMIN + signal_restart, handler_signal);
 	for (int i = 0; i < blocks_len; i++) {
 		Block *current = &blocks[i];
 		int sig = current->signal;
-		if (sig > 0) {
-			signal(SIGRTMIN + sig, handler_signal);
-		}
+		if (sig > 0) signal(SIGRTMIN + sig, handler_signal);
 	}
 #endif
 
@@ -131,7 +128,7 @@ void block_getcmd(Block *block, EBlockOrder order) {
 	FILE *cmdf;
 
 	/* clean output string */
-	for (uint i = 0; i < OUTPUT_SIZE; i++) {
+	for (int i = 0; i < OUTPUT_SIZE; i++) {
 		str[i] = '\0';
 	}
 
@@ -173,12 +170,11 @@ EBlockOrder block_order(uint pos, uint length) {
 }
 
 void find_signal_command(int signal) {
-	for (uint i = 0; i < blocks_len; i++) {
+	for (int i = 0; i < blocks_len; i++) {
 		Block *current = &blocks[i];
-		if (current->signal == signal) {
+		if (current->signal + SIGRTMIN == signal) {
 			EBlockOrder order = block_order(i, blocks_len);
 			block_getcmd(current, order);
-			update_status();
 		}
 	}
 }
@@ -192,8 +188,12 @@ void get_status(char *str, uint maxsize) {
 
 void handler_signal(int signum) {
 #ifndef __OpenBSD__
-	find_signal_command(signum);
-	update_status();
+	if (signum == signal_restart + SIGRTMIN) {
+		blocks_update(-1);
+	} else {
+		find_signal_command(signum);
+		update_status();
+	}
 #endif
 }
 
@@ -205,7 +205,7 @@ void handler_term(int signal) {
 	exit(0);
 }
 
-/* Returns zero if size has exceeded, nonzero if there's still free space */
+/* returns zero if size has exceeded, nonzero if there's still free space */
 int strcat_safe(char *string_mod, const char *string_addto, const uint maxsize) {
 	uint strpos = strlen(string_mod);
 	uint i;

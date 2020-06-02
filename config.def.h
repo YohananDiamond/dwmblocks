@@ -1,7 +1,10 @@
 /* delimeter string */
-static char *block_delim = "|";
-static char *block_prefix = " ";
-static char *block_postfix = " ";
+static const char *block_delim = "|";
+static const char *block_prefix = " ";
+static const char *block_postfix = " ";
+
+/* other options */
+static const uint signal_restart = 1;
 
 /* blocks */
 static const BlockPre blocks_pre[] = {

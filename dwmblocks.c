@@ -2,6 +2,7 @@
  * This program is not tested on OpenBSD, but I think the macros I moved still work. I hope.
  * TODO: make a man page
  * TODO: replace all int i = 0 with uint, I guess
+ * TODO: a signal to refresh the entire bar
  */
 
 #include <stdlib.h>
@@ -46,6 +47,7 @@ void get_status(char *str, uint maxsize);
 void handler_signal(int signum);
 void handler_term(int signal);
 int strcat_safe(char *string_mod, const char *string_addto, const uint maxsize);
+void str_remove_char(char *str, char c);
 void update_status(void);
 void write_setroot(char *str);
 void write_stdout(char *str);
@@ -125,16 +127,17 @@ void blocks_update(int time) {
 }
 
 void block_getcmd(Block *block, EBlockOrder order) {
+	char str[OUTPUT_SIZE]; /* idk why I had to make this here but ok */
 	FILE *cmdf;
 
 	/* clean output string */
 	for (uint i = 0; i < OUTPUT_SIZE; i++) {
-		block->output[i] = '\0';
+		str[i] = '\0';
 	}
 
 	/* prefix */
 	if (order == BLOCK_FIRST) {
-		strcat_safe(block->output, block_prefix, OUTPUT_SIZE);
+		strcat_safe(str, block_prefix, OUTPUT_SIZE);
 	}
 
 	/* command output */
@@ -143,17 +146,20 @@ void block_getcmd(Block *block, EBlockOrder order) {
 	if (cmdf) {
 		fgets(cmd_str, OUTPUT_SIZE - strlen(block->output) - 1, cmdf);
 		pclose(cmdf);
-		strcat_safe(block->output, cmd_str, OUTPUT_SIZE);
+		strcat_safe(str, cmd_str, OUTPUT_SIZE);
 	} else {
-		strcat_safe(block->output, "<FAIL>", OUTPUT_SIZE);
+		strcat_safe(str, "<FAIL>", OUTPUT_SIZE);
 	}
 
 	/* delimeter or postfix */
 	if (order == BLOCK_LAST) {
-		strcat_safe(block->output, block_postfix, OUTPUT_SIZE);
+		strcat_safe(str, block_postfix, OUTPUT_SIZE);
 	} else {
-		strcat_safe(block->output, block_delim, OUTPUT_SIZE);
+		strcat_safe(str, block_delim, OUTPUT_SIZE);
 	}
+
+	str_remove_char(str, '\n');
+	strcpy(block->output, str);
 }
 
 EBlockOrder block_order(uint pos, uint length) {
@@ -211,6 +217,22 @@ int strcat_safe(char *string_mod, const char *string_addto, const uint maxsize) 
 
 	string_mod[strpos + i] = '\0';
 	return (strpos + i == maxsize - 1) ? 0 : 1;
+}
+
+void str_remove_char(char *str, char c) {
+	/* stole and improved this one from Luke Smith */
+	char *read = str;
+	char *write = str;
+
+	while (*read) {
+		while (*read == c) {
+			read++;
+		}
+		*write = *read;
+		read++;
+		write++;
+	}
+	*write = 0;
 }
 
 void update_status(void) {

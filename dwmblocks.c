@@ -1,6 +1,5 @@
 /**
  * This program is not tested on OpenBSD, but I think the macros I moved still work. I hope.
- * TODO: make a man page
  */
 
 #include <stdlib.h>

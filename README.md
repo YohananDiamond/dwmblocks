@@ -1,8 +1,13 @@
 # dwmblocks
 
-Modular status bar for dwm written in c.
+A simple and modular status bar manager for
+[`dwm`](https://dwm.suckless.org/), written in C.
 
-# modifying blocks
+# Modifying blocks
 
-The statusbar is made from text output from commandline programs.
-Blocks are added and removed by editing the blocks.h header file.
+The status bar is made from blocks. Each block stores a command that is
+ran on the start of dwmblocks and on a specific interval or by receiving
+a specific signal.
+
+These blocks and other options (yet to document) can be specified in the
+`config.h` file.

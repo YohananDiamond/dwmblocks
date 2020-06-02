@@ -1,11 +1,11 @@
-#include<stdlib.h>
-#include<stdio.h>
-#include<string.h>
-#include<unistd.h>
-#include<signal.h>
-#include<X11/Xlib.h>
-#define LENGTH(X)               (sizeof(X) / sizeof (X[0]))
-#define CMDLENGTH		50
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <X11/Xlib.h>
+#define LENGTH(X) (sizeof(X) / sizeof (X[0]))
+#define CMDLENGTH 50
 
 typedef struct {
 	char* icon;
@@ -35,34 +35,65 @@ static char statusstr[2][256];
 static int statusContinue = 1;
 static void (*writestatus) () = setroot;
 
-//opens process *cmd and stores output in *output
-void getcmd(const Block *block, char *output)
+/**
+ * open process *cmd and store it in *output
+ *
+ * delim_data:
+ * 0 => first block
+ * 1 => middle block
+ * 2 => last block
+ */
+void getcmd(const Block *block, char *output, int delim_data)
 {
-	strcpy(output, block->icon);
-	char *cmd = block->command;
-	FILE *cmdf = popen(cmd,"r");
-	if (!cmdf)
-		return;
-	char c;
-	int i = strlen(block->icon);
-	fgets(output+i, CMDLENGTH-i, cmdf);
-	i = strlen(output);
-        for (int index = 0; delim[index]; index++)
-            output[i++] = delim[index];
-	/* if (delim != '\0' && --i) */
-	/* 	output[i++] = delim; */
-	output[i++] = '\0';
+	int strpos = 0;
+	FILE *cmdf;
+
+	/* prefix */
+	if (delim_data == 0)
+		for (int i = 0; prefix[i]; i++)
+			output[strpos++] = prefix[i];
+
+	output[strpos++] = '\0'; /* why tf is this helping it to work??? i dont get this */
+
+	/* icon */
+	for (int i = 0; block->icon[i]; i++)
+		output[strpos++] = block->icon[i];
+
+	/* command output */
+	cmdf = popen(block->command, "r");
+	if (!cmdf) return;
+
+	/* */
+	strpos = strlen(output);
+	fgets(output+strpos, CMDLENGTH-strpos, cmdf);
+
+	/* delimiter or postfix */
+	strpos = strlen(output);
+	if (delim_data != 2) /* delimiters on the right of all except the last */
+		for (int i = 0; delim[i]; i++)
+			output[strpos++] = delim[i];
+	else {
+		for (int i = 0; postfix[i]; i++) output[strpos++] = postfix[i];
+		output[strpos++] = ' '; /* weird hack to fix a bug */
+	}
+
+	output[strpos++] = '\0';
 	pclose(cmdf);
 }
 
 void getcmds(int time)
 {
 	const Block* current;
-	for(int i = 0; i < LENGTH(blocks); i++)
+	for (int i = 0; i < LENGTH(blocks); i++)
 	{	
 		current = blocks + i;
-		if ((current->interval != 0 && time % current->interval == 0) || time == -1)
-			getcmd(current,statusbar[i]);
+		if ((current->interval != 0 && time % current->interval == 0) || time == -1) {
+			int delim_data;
+			if (i == 0) delim_data = 0;
+			else if (i < (LENGTH(blocks) - 1)) delim_data = 1;
+			else delim_data = 2;
+			getcmd(current, statusbar[i], delim_data);
+		}
 	}
 }
 
@@ -73,14 +104,19 @@ void getsigcmds(int signal)
 	for (int i = 0; i < LENGTH(blocks); i++)
 	{
 		current = blocks + i;
-		if (current->signal == signal)
-			getcmd(current,statusbar[i]);
+		if (current->signal == signal) {
+			int delim_data;
+			if (i == 0) delim_data = 0;
+			else if (i < (LENGTH(blocks) - 1)) delim_data = 1;
+			else delim_data = 2;
+			getcmd(current, statusbar[i], delim_data);
+		}
 	}
 }
 
 void setupsignals()
 {
-	for(int i = 0; i < LENGTH(blocks); i++)
+	for (int i = 0; i < LENGTH(blocks); i++)
 	{	  
 		if (blocks[i].signal > 0)
 			signal(SIGRTMIN+blocks[i].signal, sighandler);
@@ -101,7 +137,7 @@ int getstatus(char *str, char *last)
 
 void setroot()
 {
-	if (!getstatus(statusstr[0], statusstr[1]))//Only set root if text has changed.
+	if (!getstatus(statusstr[0], statusstr[1])) // Only set root if text has changed.
 		return;
 	Display *d = XOpenDisplay(NULL);
 	if (d) {
@@ -156,8 +192,8 @@ int main(int argc, char** argv)
 	for(int i = 0; i < argc; i++)
 	{	
 		if (!strcmp("-d",argv[i]))
-                    delim = argv[++i];
-			/* delim = argv[++i][0]; */
+			delim = argv[++i];
+		/* delim = argv[++i][0]; */
 		else if(!strcmp("-p",argv[i]))
 			writestatus = pstdout;
 	}

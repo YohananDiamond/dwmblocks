@@ -1,203 +1,244 @@
+/**
+ * This program is not tested on OpenBSD, but I think the macros I moved still work. I hope.
+ * TODO: make a man page
+ * TODO: replace all int i = 0 with uint, I guess
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
 #include <X11/Xlib.h>
-#define LENGTH(X) (sizeof(X) / sizeof (X[0]))
-#define CMDLENGTH 50
 
+#define LENGTH(X) (sizeof (X) / sizeof (X[0]))
+#define STR_EQ(str1, str2) !strcmp((str1), (str2))
+#define OUTPUT_SIZE 64
+#define STATUS_SIZE 256
+
+/* types */
 typedef struct {
-	char* icon;
-	char* command;
-	unsigned int interval;
-	unsigned int signal;
+	char *command;
+	uint interval;
+	uint signal;
+} BlockPre;
+typedef struct {
+	char output[OUTPUT_SIZE];
+	char *command;
+	uint interval;
+	uint signal;
 } Block;
-void sighandler(int num);
-void getcmds(int time);
-#ifndef __OpenBSD__
-void getsigcmds(int signal);
-void setupsignals();
-void sighandler(int signum);
-#endif
-int getstatus(char *str, char *last);
-void setroot();
-void statusloop();
-void termhandler(int signum);
+typedef enum {
+	BLOCK_FIRST = 0,
+	BLOCK_NORMAL = 1,
+	BLOCK_LAST = 2,
+} EBlockOrder;
 
 #include "config.h"
 
-static Display *dpy;
-static int screen;
-static Window root;
-static char statusbar[LENGTH(blocks)][CMDLENGTH] = {0};
-static char statusstr[2][256];
-static int statusContinue = 1;
-static void (*writestatus) () = setroot;
+/* internal functions */
+void main(int argc, char **argv);
+void blocks_update(int time);
+void block_getcmd(Block *block, EBlockOrder order);
+EBlockOrder block_order(uint pos, uint length);
+void find_signal_command(int signal);
+void get_status(char *str, uint maxsize);
+void handler_signal(int signum);
+void handler_term(int signal);
+int strcat_safe(char *string_mod, const char *string_addto, const uint maxsize);
+void update_status(void);
+void write_setroot(char *str);
+void write_stdout(char *str);
 
-/**
- * open process *cmd and store it in *output
- *
- * delim_data:
- * 0 => first block
- * 1 => middle block
- * 2 => last block
- */
-void getcmd(const Block *block, char *output, int delim_data)
-{
-	int strpos = 0;
+/* globals */
+static void (*write_fn)(char *str) = write_setroot;
+static int status_continue = 1;
+static uint blocks_len;
+static Block *blocks;
+static char status_str[STATUS_SIZE];
+static char status_str_old[STATUS_SIZE];
+
+void main(int argc, char **argv) {
+	int timer = 0;
+
+	for (int i = 1; i < argc; i++) {
+		if (STR_EQ("-h", argv[i]) || STR_EQ("--help", argv[i])) {
+			fprintf(stderr, "Usage: %s [{ -h | --help }]\n", argv[0]);
+			fprintf(stderr, "There are no arguments for now.\n");
+		} else {
+			fprintf(stderr, "Invalid argument: %s\n", argv[i]);
+			exit(1);
+		}
+	}
+
+	/* convert blocks_pre into blocks */
+	blocks_len = LENGTH(blocks_pre);
+	blocks = malloc((sizeof *blocks) * blocks_len);
+	for (int i = 0; i < blocks_len; i++) {
+		const BlockPre *old = &blocks_pre[i];
+		Block *new = &blocks[i];
+
+		new->output[0] = '\0'; /* to assert the string length is 0 if there's junk memory there (idk if this is correct) */
+		new->command = old->command;
+		new->interval = old->interval;
+		new->signal = old->signal;
+	}
+
+	/* set up standard signals */
+	signal(SIGTERM, handler_term);
+	signal(SIGINT, handler_term);
+
+#ifndef __OpenBSD__
+	/* set up custom signals */
+	for (int i = 0; i < blocks_len; i++) {
+		Block *current = &blocks[i];
+		int sig = current->signal;
+		if (sig > 0) {
+			signal(SIGRTMIN + sig, handler_signal);
+		}
+	}
+#endif
+
+	blocks_update(-1);
+	while (status_continue) {
+		blocks_update(timer);
+
+		/* put old string to status_str_old */
+		status_str_old[0] = '\0';
+		strcat_safe(status_str_old, status_str, STATUS_SIZE);
+
+		update_status();
+		sleep(1.0);
+		timer++;
+	}
+}
+
+void blocks_update(int time) {
+	for (int i = 0; i < blocks_len; i++) {
+		Block *current = &blocks[i];
+		if ((current->interval != 0 && time % current->interval == 0)
+				|| (time == -1)) {
+			EBlockOrder order = block_order(i, blocks_len);
+			block_getcmd(current, order);
+		}
+	}
+}
+
+void block_getcmd(Block *block, EBlockOrder order) {
 	FILE *cmdf;
 
+	/* clean output string */
+	for (uint i = 0; i < OUTPUT_SIZE; i++) {
+		block->output[i] = '\0';
+	}
+
 	/* prefix */
-	if (delim_data == 0)
-		for (int i = 0; prefix[i]; i++)
-			output[strpos++] = prefix[i];
-
-	output[strpos++] = '\0'; /* why tf is this helping it to work??? i dont get this */
-
-	/* icon */
-	for (int i = 0; block->icon[i]; i++)
-		output[strpos++] = block->icon[i];
+	if (order == BLOCK_FIRST) {
+		strcat_safe(block->output, block_prefix, OUTPUT_SIZE);
+	}
 
 	/* command output */
+	char cmd_str[OUTPUT_SIZE];
 	cmdf = popen(block->command, "r");
-	if (!cmdf) return;
-
-	/* */
-	strpos = strlen(output);
-	fgets(output+strpos, CMDLENGTH-strpos, cmdf);
-
-	/* delimiter or postfix */
-	strpos = strlen(output);
-	if (delim_data != 2) /* delimiters on the right of all except the last */
-		for (int i = 0; delim[i]; i++)
-			output[strpos++] = delim[i];
-	else {
-		for (int i = 0; postfix[i]; i++) output[strpos++] = postfix[i];
-		output[strpos++] = ' '; /* weird hack to fix a bug */
+	if (cmdf) {
+		fgets(cmd_str, OUTPUT_SIZE - strlen(block->output) - 1, cmdf);
+		pclose(cmdf);
+		strcat_safe(block->output, cmd_str, OUTPUT_SIZE);
+	} else {
+		strcat_safe(block->output, "<FAIL>", OUTPUT_SIZE);
 	}
 
-	output[strpos++] = '\0';
-	pclose(cmdf);
-}
-
-void getcmds(int time)
-{
-	const Block* current;
-	for (int i = 0; i < LENGTH(blocks); i++)
-	{	
-		current = blocks + i;
-		if ((current->interval != 0 && time % current->interval == 0) || time == -1) {
-			int delim_data;
-			if (i == 0) delim_data = 0;
-			else if (i < (LENGTH(blocks) - 1)) delim_data = 1;
-			else delim_data = 2;
-			getcmd(current, statusbar[i], delim_data);
-		}
+	/* delimeter or postfix */
+	if (order == BLOCK_LAST) {
+		strcat_safe(block->output, block_postfix, OUTPUT_SIZE);
+	} else {
+		strcat_safe(block->output, block_delim, OUTPUT_SIZE);
 	}
 }
 
-#ifndef __OpenBSD__
-void getsigcmds(int signal)
-{
-	const Block *current;
-	for (int i = 0; i < LENGTH(blocks); i++)
-	{
-		current = blocks + i;
+EBlockOrder block_order(uint pos, uint length) {
+	if (pos == 0) {
+		return BLOCK_FIRST;
+	} else if (pos < length - 1) {
+		return BLOCK_NORMAL;
+	} else {
+		return BLOCK_LAST;
+	}
+}
+
+void find_signal_command(int signal) {
+	for (uint i = 0; i < blocks_len; i++) {
+		Block *current = &blocks[i];
 		if (current->signal == signal) {
-			int delim_data;
-			if (i == 0) delim_data = 0;
-			else if (i < (LENGTH(blocks) - 1)) delim_data = 1;
-			else delim_data = 2;
-			getcmd(current, statusbar[i], delim_data);
+			EBlockOrder order = block_order(i, blocks_len);
+			block_getcmd(current, order);
+			update_status();
 		}
 	}
 }
 
-void setupsignals()
-{
-	for (int i = 0; i < LENGTH(blocks); i++)
-	{	  
-		if (blocks[i].signal > 0)
-			signal(SIGRTMIN+blocks[i].signal, sighandler);
+void get_status(char *str, uint maxsize) {
+	for (int i = 0; i < blocks_len; i++) {
+		Block *current = &blocks[i];
+		strcat_safe(str, current->output, maxsize);
 	}
-
-}
-#endif
-
-int getstatus(char *str, char *last)
-{
-	strcpy(last, str);
-	str[0] = '\0';
-	for(int i = 0; i < LENGTH(blocks); i++)
-		strcat(str, statusbar[i]);
-	str[strlen(str)-1] = '\0';
-	return strcmp(str, last);//0 if they are the same
 }
 
-void setroot()
-{
-	if (!getstatus(statusstr[0], statusstr[1])) // Only set root if text has changed.
-		return;
-	Display *d = XOpenDisplay(NULL);
-	if (d) {
-		dpy = d;
-	}
-	screen = DefaultScreen(dpy);
-	root = RootWindow(dpy, screen);
-	XStoreName(dpy, root, statusstr[0]);
-	XCloseDisplay(dpy);
-}
-
-void pstdout()
-{
-	if (!getstatus(statusstr[0], statusstr[1]))//Only write out if text has changed.
-		return;
-	printf("%s\n",statusstr[0]);
-	fflush(stdout);
-}
-
-void statusloop()
-{
+void handler_signal(int signum) {
 #ifndef __OpenBSD__
-	setupsignals();
+	find_signal_command(signum);
+	update_status();
 #endif
-	int i = 0;
-	getcmds(-1);
-	while(statusContinue)
-	{
-		getcmds(i);
-		writestatus();
-		sleep(1.0);
-		i++;
-	}
 }
 
-#ifndef __OpenBSD__
-void sighandler(int signum)
-{
-	getsigcmds(signum-SIGRTMIN);
-	writestatus();
-}
-#endif
+void handler_term(int signal) {
+	/* free resources */
+	free(blocks);
 
-void termhandler(int signum)
-{
-	statusContinue = 0;
+	status_continue = 0;
 	exit(0);
 }
 
-int main(int argc, char** argv)
-{
-	for(int i = 0; i < argc; i++)
-	{	
-		if (!strcmp("-d",argv[i]))
-			delim = argv[++i];
-		/* delim = argv[++i][0]; */
-		else if(!strcmp("-p",argv[i]))
-			writestatus = pstdout;
+/* Returns zero if size has exceeded, nonzero if there's still free space */
+int strcat_safe(char *string_mod, const char *string_addto, const uint maxsize) {
+	uint strpos = strlen(string_mod);
+	uint i;
+
+	for (i = 0; string_addto[i]; i++) {
+		if (strpos + i == maxsize - 1) break;
+		string_mod[strpos + i] = string_addto[i];
 	}
-	signal(SIGTERM, termhandler);
-	signal(SIGINT, termhandler);
-	statusloop();
+
+	string_mod[strpos + i] = '\0';
+	return (strpos + i == maxsize - 1) ? 0 : 1;
+}
+
+void update_status(void) {
+		/* get status */
+		status_str[0] = '\0';
+		get_status(status_str, STATUS_SIZE);
+
+		/* only write if status has changed */
+		if (!STR_EQ(status_str, status_str_old)) {
+			write_fn(status_str);
+		}
+}
+
+void write_setroot(char *str) {
+	Display *display;
+	Window root;
+	int screen;
+
+	display = XOpenDisplay(NULL);
+	if (!display) return;
+
+	screen = DefaultScreen(display);
+	root = RootWindow(display, screen);
+	XStoreName(display, root, str);
+	XCloseDisplay(display);
+}
+
+void write_stdout(char *str) {
+	printf("%s\n", str);
+	fflush(stdout);
 }

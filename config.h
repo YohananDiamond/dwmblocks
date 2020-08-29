@@ -1,20 +1,21 @@
-#define BINBLOCK(bin, interval, signal) {"~/.local/bin/status-dwm/" bin, interval, signal}
+/* settings for the edges of the root name */
+static const char all_prefix[]      = " ";
+static const char all_postfix[]     = " ";
 
-/* delimeter string */
-static const char *block_delim = " | ";
-static const char *block_prefix = " ";
-static const char *block_postfix = " ";
+/* settings for each individual block */
+static const char block_delimeter[] = " | ";
+static const char block_prefix[]    = "<";
+static const char block_postfix[]   = ">";
 
-/* other options */
-static const uint signal_restart = 1;
+/* extra signals */
+static const uint signal_all        = 1;
 
-/* blocks */
+/* blocks to load */
 static const BlockPre blocks_pre[] = {
 	/* command, update interval, update signal */
-	/* BINBLOCK("swap", 10, 0), */
-	BINBLOCK("ram", 5, 0),
-	BINBLOCK("cpu", 10, 0),
-	BINBLOCK("battery", 5, 0),
-	BINBLOCK("volume", 5, 10),
-	BINBLOCK("clock", 5, 0),
+	{"dwmblocks-ram", 5, 0},
+	{"dwmblocks-cpu", 10, 0},
+	{"dwmblocks-battery", 5, 0},
+	{"dwmblocks-volume", 5, 10},
+	{"dwmblocks-clock", 5, 0},
 };

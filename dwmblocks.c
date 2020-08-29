@@ -1,7 +1,3 @@
-/**
- * This program is not tested on OpenBSD, but I think the macros I moved still work. I hope.
- */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,22 +10,23 @@
 #define OUTPUT_SIZE 64
 #define STATUS_SIZE 256
 
-/* types */
-typedef struct {
+typedef struct BlockPre {
 	char *command;
 	uint interval;
 	uint signal;
 } BlockPre;
-typedef struct {
+
+typedef struct Block {
 	char output[OUTPUT_SIZE];
 	char *command;
 	uint interval;
 	uint signal;
 } Block;
-typedef enum {
-	BLOCK_FIRST = 0,
-	BLOCK_NORMAL = 1,
-	BLOCK_LAST = 2,
+
+typedef enum EBlockOrder {
+	BO_FIRST,
+	BO_NORMAL,
+	BO_LAST,
 } EBlockOrder;
 
 #include "config.h"
@@ -64,6 +61,7 @@ void main(int argc, char **argv) {
 		if (STR_EQ("-h", argv[i]) || STR_EQ("--help", argv[i])) {
 			fprintf(stderr, "Usage: %s [{ -h | --help }]\n", argv[0]);
 			fprintf(stderr, "There are no arguments for now.\n");
+			exit(1);
 		} else {
 			fprintf(stderr, "Invalid argument: %s\n", argv[i]);
 			exit(1);
@@ -89,7 +87,9 @@ void main(int argc, char **argv) {
 
 #ifndef __OpenBSD__
 	/* set up custom signals */
-	if (signal_restart > 0) signal(SIGRTMIN + signal_restart, handler_signal);
+	if (signal_all > 0) {
+		signal(SIGRTMIN + signal_all, handler_signal);
+	}
 	for (int i = 0; i < blocks_len; i++) {
 		Block *current = &blocks[i];
 		int sig = current->signal;
@@ -115,7 +115,7 @@ void blocks_update(int time) {
 	for (int i = 0; i < blocks_len; i++) {
 		Block *current = &blocks[i];
 		if ((current->interval != 0 && time % current->interval == 0)
-				|| (time == -1)) {
+		    || (time == -1)) {
 			EBlockOrder order = block_order(i, blocks_len);
 			block_getcmd(current, order);
 		}
@@ -132,26 +132,28 @@ void block_getcmd(Block *block, EBlockOrder order) {
 	}
 
 	/* prefix */
-	if (order == BLOCK_FIRST) {
-		strcat_safe(str, block_prefix, OUTPUT_SIZE);
+	if (order == BO_FIRST) {
+		strcat_safe(str, all_prefix, OUTPUT_SIZE);
 	}
 
 	/* command output */
 	char cmd_str[OUTPUT_SIZE];
 	cmdf = popen(block->command, "r");
+	strcat_safe(str, block_prefix, OUTPUT_SIZE);
 	if (cmdf) {
 		fgets(cmd_str, OUTPUT_SIZE - strlen(block->output) - 1, cmdf);
 		pclose(cmdf);
 		strcat_safe(str, cmd_str, OUTPUT_SIZE);
 	} else {
-		strcat_safe(str, "<FAIL>", OUTPUT_SIZE);
+		strcat_safe(str, "FAILED", OUTPUT_SIZE);
 	}
+	strcat_safe(str, block_postfix, OUTPUT_SIZE);
 
 	/* delimeter or postfix */
-	if (order == BLOCK_LAST) {
-		strcat_safe(str, block_postfix, OUTPUT_SIZE);
+	if (order == BO_LAST) {
+		strcat_safe(str, all_postfix, OUTPUT_SIZE);
 	} else {
-		strcat_safe(str, block_delim, OUTPUT_SIZE);
+		strcat_safe(str, block_delimeter, OUTPUT_SIZE);
 	}
 
 	str_remove_char(str, '\n');
@@ -160,11 +162,11 @@ void block_getcmd(Block *block, EBlockOrder order) {
 
 EBlockOrder block_order(uint pos, uint length) {
 	if (pos == 0) {
-		return BLOCK_FIRST;
+		return BO_FIRST;
 	} else if (pos < length - 1) {
-		return BLOCK_NORMAL;
+		return BO_NORMAL;
 	} else {
-		return BLOCK_LAST;
+		return BO_LAST;
 	}
 }
 
@@ -187,7 +189,7 @@ void get_status(char *str, uint maxsize) {
 
 void handler_signal(int signum) {
 #ifndef __OpenBSD__
-	if (signum == signal_restart + SIGRTMIN) {
+	if (signum == signal_all + SIGRTMIN) {
 		blocks_update(-1);
 	} else {
 		find_signal_command(signum);
@@ -235,14 +237,14 @@ void str_remove_char(char *str, char c) {
 }
 
 void update_status(void) {
-		/* get status */
-		status_str[0] = '\0';
-		get_status(status_str, STATUS_SIZE);
+	/* get status */
+	status_str[0] = '\0';
+	get_status(status_str, STATUS_SIZE);
 
-		/* only write if status has changed */
-		if (!STR_EQ(status_str, status_str_old)) {
-			write_fn(status_str);
-		}
+	/* only write if status has changed */
+	if (!STR_EQ(status_str, status_str_old)) {
+		write_fn(status_str);
+	}
 }
 
 void write_setroot(char *str) {

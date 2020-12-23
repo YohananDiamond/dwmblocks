@@ -3,9 +3,9 @@ static const char all_prefix[]      = " ";
 static const char all_postfix[]     = " ";
 
 /* settings for each individual block */
-static const char block_delimeter[] = " | ";
-static const char block_prefix[]    = "<";
-static const char block_postfix[]   = ">";
+static const char block_delimeter[] = "  ";
+static const char block_prefix[]    = "";
+static const char block_postfix[]   = "";
 
 /* extra signals */
 static const uint signal_all        = 1;
